@@ -58,6 +58,20 @@ impl<T> Graph<T> {
     }
 
     pub fn add_edge(&mut self, source: NodeIndex, target: NodeIndex) {
+        if self.nodes.len() < 2
+            || source == target
+            || source.0 >= self.nodes.len()
+            || target.0 >= self.nodes.len()
+        {
+            panic!("invalid edge");
+        }
+        if let Some(_) = self
+            .edges
+            .iter()
+            .find(|edge| edge.source == source && edge.target == target)
+        {
+            panic!("invalid edge");
+        }
         let index = self.edges.len();
         let node_source = &self.nodes[source.0];
         self.edges
@@ -82,7 +96,7 @@ impl<T> Graph<T> {
     }
 
     pub fn upstream_parents(&self, from: NodeIndex) -> Vec<NodeIndex> {
-        let parents = vec![];
+        let mut parents = vec![];
         self.iterate_parents(from, &mut parents);
         parents
     }
@@ -164,10 +178,63 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
+    fn add_edge_on_empty_graph() {
+        let mut graph = Graph::<Dummy>::new();
+        graph.add_edge(NodeIndex(0), NodeIndex(1));
+    }
+
+    #[test]
+    #[should_panic]
+    fn add_edge_on_graph_with_one_node() {
+        let mut graph = Graph::<Dummy>::new();
+        let one = graph.add_node(Dummy("one"));
+        graph.add_edge(one, NodeIndex(1));
+    }
+
+    #[test]
+    #[should_panic]
+    fn add_edge_with_two_equal_indexes() {
+        let mut graph = Graph::<Dummy>::new();
+        graph.add_node(Dummy("one"));
+        graph.add_node(Dummy("two"));
+        graph.add_edge(NodeIndex(0), NodeIndex(0));
+    }
+
+    #[test]
+    #[should_panic]
+    fn add_edge_with_invalid_index() {
+        let mut graph = Graph::<Dummy>::new();
+        graph.add_node(Dummy("one"));
+        graph.add_node(Dummy("two"));
+        graph.add_edge(NodeIndex(0), NodeIndex(2));
+    }
+
+    #[test]
+    #[should_panic]
+    fn add_same_edge_twice() {
+        let mut graph = Graph::<Dummy>::new();
+        let one = graph.add_node(Dummy("one"));
+        let two = graph.add_node(Dummy("two"));
+        graph.add_edge(one, two);
+        assert_eq!(graph.edges.len(), 1);
+        graph.add_edge(one, two);
+    }
+
+    #[test]
     fn adding_edges() {
         let mut graph = Graph::<Dummy>::new();
         let one = graph.add_node(Dummy("one"));
         let two = graph.add_node(Dummy("two"));
         graph.add_edge(one, two);
+        assert_eq!(graph.edges.len(), 1);
+        assert_eq!(graph.edges[0].source, one);
+        assert_eq!(graph.edges[0].target, two);
+        assert_eq!(graph.edges[0].next_edge, None);
+        let three = graph.add_node(Dummy("three"));
+        graph.add_edge(one, three);
+        assert_eq!(graph.edges.len(), 2);
+        assert_eq!(graph.edges[0].source, one);
+        assert_eq!(graph.edges[0].target, two);
     }
 }
