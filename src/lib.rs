@@ -168,11 +168,14 @@ impl<'a> Parser<'a> {
                 // self.parse_option(&arg);
             } else {
                 if !self.handle_subcommand(arg) {
-                    let node_index = self.graph.add_node(Arg::new(ArgType::Argument(arg)));
-                    self.graph.nodes[node_index.0].data.found = true;
+                    let node_index;
+                    let data = Arg::new(ArgType::Argument(arg));
                     if let Some(index) = self.current_subcmd {
-                        self.graph.add_edge(index, node_index);
+                        node_index = self.graph.add_node_to(index, data);
+                    } else {
+                        node_index = self.graph.add_node(data);
                     }
+                    self.graph.nodes[node_index.0].data.found = true;
                 }
             }
         }
@@ -256,18 +259,18 @@ fn iterate_subcommand_config<'a>(
     current_subcmd: &SubCommandConfig<'a>,
     previous_index: Option<NodeIndex>,
 ) {
-    let subcommand_index = graph.add_node(Arg::new(ArgType::SubCommand(SubCommand::from(
-        current_subcmd,
-    ))));
+    let subcmd_index;
+    let data = Arg::new(ArgType::SubCommand(SubCommand::from(current_subcmd)));
     if let Some(index) = previous_index {
-        graph.add_edge(index, subcommand_index);
+        subcmd_index = graph.add_node_to(index, data);
+    } else {
+        subcmd_index = graph.add_node(data);
     }
     for flag in &current_subcmd.flags {
-        let flag_index = graph.add_node(Arg::new(ArgType::Flag(*flag)));
-        graph.add_edge(subcommand_index, flag_index);
+        graph.add_node_to(subcmd_index, Arg::new(ArgType::Flag(*flag)));
     }
     for subcommand in &current_subcmd.subcommands {
-        iterate_subcommand_config(graph, subcommand, Some(subcommand_index));
+        iterate_subcommand_config(graph, subcommand, Some(subcmd_index));
     }
 }
 
