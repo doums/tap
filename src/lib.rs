@@ -13,6 +13,7 @@ pub enum ArgType<'a> {
     SubCommand(SubCommand<'a>),
     Argument(&'a str),
     Unknown(&'a str),
+    UnknownFlag(&'a str),
     Over,
 }
 
@@ -196,6 +197,57 @@ impl<'a> Parser<'a> {
             return true;
         }
         false
+    }
+
+    fn parse_long_option(&mut self, arg: &str) {
+        let current_arg = &arg[2..];
+        let direct_children = self.graph.direct_children(self.current_subcmd);
+        match current_arg.find("=") {
+            None => {
+                if let Some(i) = direct_children.iter().find(|index| {
+                    if let ArgType::Flag(flag) = &self.graph.nodes[index.0].data.kind {
+                        if flag.long == current_arg {
+                            return true;
+                        }
+                    }
+                    false
+                }) {
+                    self.graph.nodes[i.0].data.found = true;
+                } else {
+                    let index = self
+                        .graph
+                        .add_node(Arg::new(ArgType::UnknownFlag(current_arg)));
+                    if let Some(i) = self.current_subcmd {
+                        self.graph.add_edge(i, index);
+                    }
+                }
+            }
+            Some(i) => {
+                let first = &current_arg[..i];
+                let last = &current_arg[i + 1..];
+                if let Some(i) = direct_children.iter().find(|index| {
+                    if let ArgType::Flag(flag) = &self.graph.nodes[index.0].data.kind {
+                        if flag.long == first {
+                            return true;
+                        }
+                    }
+                    false
+                }) {
+                    if option.3 == true && !last.is_empty() {
+                        tokens.push(Token::Option(&option, Some(String::from(last))));
+                    } else {
+                        tokens.push(Token::Option(&option, None));
+                    }
+                } else {
+                    let index = self
+                        .graph
+                        .add_node(Arg::new(ArgType::UnknownFlag(current_arg)));
+                    if let Some(i) = self.current_subcmd {
+                        self.graph.add_edge(i, index);
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -27,13 +27,18 @@ impl<T> Node<T> {
 
 #[derive(Debug)]
 pub struct Edge {
+    source: NodeIndex,
     target: NodeIndex,
     next_edge: Option<EdgeIndex>,
 }
 
 impl Edge {
-    pub fn new(target: NodeIndex, next_edge: Option<EdgeIndex>) -> Edge {
-        Edge { target, next_edge }
+    pub fn new(source: NodeIndex, target: NodeIndex, next_edge: Option<EdgeIndex>) -> Edge {
+        Edge {
+            source,
+            target,
+            next_edge,
+        }
     }
 }
 
@@ -55,23 +60,16 @@ impl<T> Graph<T> {
     pub fn add_edge(&mut self, source: NodeIndex, target: NodeIndex) {
         let index = self.edges.len();
         let node_source = &self.nodes[source.0];
-        self.edges.push(Edge::new(target, node_source.first_edge));
+        self.edges
+            .push(Edge::new(source, target, node_source.first_edge));
         self.nodes[source.0].first_edge = Some(EdgeIndex(index));
     }
-
-    // pub fn find_node<P>(&self, predicate: P, from: Option<NodeIndex>) -> Option<NodeIndex>
-    // where
-    // P: FnMut(&&Node<T>) -> bool,
-    // {
-    // if let Some(value) = from {}
-    // }
 
     pub fn direct_children(&self, from: Option<NodeIndex>) -> Vec<NodeIndex> {
         let mut childrens = vec![];
         if let Some(value) = from {
-            let from_node = &self.nodes[value.0];
-            if let Some(edge) = from_node.first_edge {
-                self.iterate_edges(edge, &mut childrens);
+            for edge in self.edges.iter().filter(|edge| edge.source == value) {
+                childrens.push(edge.target);
             }
         } else {
             for (i, _) in self.nodes.iter().enumerate() {
@@ -83,11 +81,18 @@ impl<T> Graph<T> {
         childrens
     }
 
-    fn iterate_edges(&self, index: EdgeIndex, childrens: &mut Vec<NodeIndex>) {
-        let from_edge = &self.edges[index];
-        childrens.push(from_edge.target);
-        if let Some(edge) = from_edge.next_edge {
-            self.iterate_edges(edge, childrens);
+    pub fn upstream_parents(&self, from: NodeIndex) -> Vec<NodeIndex> {
+        let parents = vec![];
+        self.iterate_parents(from, &mut parents);
+        parents
+    }
+
+    fn iterate_parents(&self, child: NodeIndex, parents: &mut Vec<NodeIndex>) {
+        for edge in self.edges.iter().filter(|edge| edge.target == child) {
+            if let None = parents.iter().find(|&&index| index == edge.source) {
+                parents.push(edge.source);
+                self.iterate_parents(edge.source, parents);
+            }
         }
     }
 }
@@ -127,5 +132,42 @@ impl PartialEq for NodeIndex {
 impl PartialEq for EdgeIndex {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Copy, Clone)]
+    struct Dummy(&'static str);
+
+    #[test]
+    fn graph_new() {
+        let mut graph = Graph::<Dummy>::new();
+        assert_eq!(graph.nodes.len(), 0);
+        assert_eq!(graph.edges.len(), 0);
+        assert_eq!(graph.next(), None);
+    }
+
+    #[test]
+    fn adding_nodes() {
+        let mut graph = Graph::<Dummy>::new();
+        let index = graph.add_node(Dummy("one"));
+        assert_eq!(index, NodeIndex(0));
+        assert_eq!(graph.nodes.len(), 1);
+        assert_eq!(graph.nodes[0].data.0, "one");
+        let index = graph.add_node(Dummy("two"));
+        assert_eq!(index, NodeIndex(1));
+        assert_eq!(graph.nodes.len(), 2);
+        assert_eq!(graph.nodes[1].data.0, "two");
+    }
+
+    #[test]
+    fn adding_edges() {
+        let mut graph = Graph::<Dummy>::new();
+        let one = graph.add_node(Dummy("one"));
+        let two = graph.add_node(Dummy("two"));
+        graph.add_edge(one, two);
     }
 }
