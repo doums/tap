@@ -182,24 +182,25 @@ impl<'a> Parser<'a> {
     }
 
     fn handle_subcommand(&mut self, arg: &str) -> bool {
-        let direct_children = self.graph.direct_children(self.current_subcmd);
-        let result = direct_children.iter().find(|index| {
-            if let ArgType::SubCommand(subcommand) = &self.graph.nodes[index.0].data.kind {
-                if subcommand.name == arg {
-                    return true;
-                }
-                if let Some(_) = subcommand.aliases.iter().find(|&&alias| alias == arg) {
-                    return true;
-                }
-            }
-            false
-        });
-        if let Some(&index) = result {
-            self.graph.nodes[index.0].data.found = true;
-            self.current_subcmd = Some(index);
-            return true;
-        }
-        false
+        true
+        // let direct_children = self.graph.children(self.current_subcmd);
+        // let result = direct_children.find(|index| {
+        // if let ArgType::SubCommand(subcommand) = &self.graph.nodes[index.0].data.kind {
+        // if subcommand.name == arg {
+        // return true;
+        // }
+        // if let Some(_) = subcommand.aliases.iter().find(|&&alias| alias == arg) {
+        // return true;
+        // }
+        // }
+        // false
+        // });
+        // if let Some(&index) = result {
+        // self.graph.nodes[index.0].data.found = true;
+        // self.current_subcmd = Some(index);
+        // return true;
+        // }
+        // false
     }
 
     // fn parse_long_option(&mut self, arg: &str) {

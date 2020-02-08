@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::ops::Index;
 
 #[derive(Debug, Copy, Clone)]
@@ -84,71 +83,125 @@ impl<T> Graph<T> {
         self.nodes[source.0].first_edge = Some(EdgeIndex(index));
     }
 
-    pub fn direct_children(&self, from: Option<NodeIndex>) -> Vec<NodeIndex> {
-        let mut childrens = vec![];
-        if let Some(value) = from {
-            for edge in self.edges.iter().filter(|edge| edge.source == value) {
-                childrens.push(edge.target);
-            }
-        } else {
-            for (i, _) in self.nodes.iter().enumerate() {
-                if let None = self.edges.iter().find(|edge| edge.target == NodeIndex(i)) {
-                    childrens.push(NodeIndex(i));
-                }
-            }
-        }
-        childrens
+    pub fn roots(&self) -> Roots {
+        Roots::new(self)
     }
 
-    pub fn upstream_parents(&self, from: NodeIndex) -> Vec<NodeIndex> {
-        if from.0 >= self.nodes.len() {
-            panic!("invalid index");
-        }
-        let mut parents = vec![];
-        self.iterate_parents(from, &mut parents, from);
-        parents
+    pub fn successors(&self, source: NodeIndex) -> Successors {
+        let first_outgoing_edge = self.nodes[source].first_edge;
+        Successors::new(&self.edges, first_outgoing_edge)
     }
 
-    fn iterate_parents(&self, child: NodeIndex, parents: &mut Vec<NodeIndex>, from: NodeIndex) {
-        for edge in self.edges.iter().filter(|edge| edge.target == child) {
-            if let None = parents.iter().find(|&&index| index == edge.source) {
-                if edge.source != from {
-                    parents.push(edge.source);
-                    self.iterate_parents(edge.source, parents, from);
-                }
-            }
-        }
+    pub fn ancestors(&self, source: NodeIndex) -> Ancestors {
+        Ancestors::new(&self, source)
     }
 }
 
-pub struct Children<'a, T> {
-    graph: &'a Graph<T>,
+pub struct Successors<'a> {
+    edges: &'a Vec<Edge>,
     current_edge_index: Option<EdgeIndex>,
 }
 
-impl<'a, T> Children<'a, T> {
-    fn new(graph: &'a Graph<T>, from: Option<EdgeIndex>) -> Self {
-        Children {
-            graph,
-            current_edge_index: from,
+impl<'a> Successors<'a> {
+    fn new(edges: &'a Vec<Edge>, index: Option<EdgeIndex>) -> Self {
+        Successors {
+            edges,
+            current_edge_index: index,
         }
     }
 }
 
-impl<T> Iterator for Children<'_, T> {
+impl Iterator for Successors<'_> {
     type Item = NodeIndex;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.graph.edges.len() == 0 {
+        if self.edges.is_empty() == true {
             return None;
         }
         match self.current_edge_index {
             None => None,
             Some(edge_index) => {
-                let edge = &self.graph.edges[edge_index];
+                let edge = &self.edges[edge_index];
                 self.current_edge_index = edge.next_edge;
                 Some(edge.target)
             }
+        }
+    }
+}
+
+pub struct Ancestors {
+    data: Vec<NodeIndex>,
+    current_index: usize,
+}
+
+impl Ancestors {
+    fn new<T>(graph: &Graph<T>, from: NodeIndex) -> Self {
+        if from.0 >= graph.nodes.len() {
+            panic!("invalid index");
+        }
+        let mut data = vec![];
+        for edge in graph.edges.iter().filter(|edge| edge.target == from) {
+            if let None = data.iter().find(|&&index| index == edge.source) {
+                if edge.source != from {
+                    data.push(edge.source);
+                }
+            }
+        }
+        Ancestors {
+            data,
+            current_index: 0,
+        }
+    }
+}
+
+impl Iterator for Ancestors {
+    type Item = NodeIndex;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.data.is_empty() == true {
+            return None;
+        }
+        if let Some(value) = self.data.get(self.current_index) {
+            self.current_index += 1;
+            Some(*value)
+        } else {
+            None
+        }
+    }
+}
+
+pub struct Roots {
+    data: Vec<NodeIndex>,
+    current_index: usize,
+}
+
+impl Roots {
+    fn new<T>(graph: &Graph<T>) -> Roots {
+        let mut data = vec![];
+        for (i, _) in graph.nodes.iter().enumerate() {
+            if let None = graph.edges.iter().find(|edge| edge.target == NodeIndex(i)) {
+                data.push(NodeIndex(i));
+            }
+        }
+        Roots {
+            data,
+            current_index: 0,
+        }
+    }
+}
+
+impl Iterator for Roots {
+    type Item = NodeIndex;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.data.is_empty() == true {
+            return None;
+        }
+        if let Some(value) = self.data.get(self.current_index) {
+            self.current_index += 1;
+            Some(*value)
+        } else {
+            None
         }
     }
 }
@@ -212,9 +265,18 @@ mod tests {
 
     #[test]
     fn graph_new() {
-        let mut graph = Graph::<Dummy>::new();
+        let graph = Graph::<Dummy>::new();
         assert_eq!(graph.nodes.len(), 0);
         assert_eq!(graph.edges.len(), 0);
+    }
+
+    #[test]
+    fn successors_new() {
+        let graph = Graph::<Dummy>::new();
+        let successors = Successors::new(&graph.edges, None);
+        assert_eq!(successors.current_edge_index, None);
+        let successors = Successors::new(&graph.edges, Some(EdgeIndex(42)));
+        assert_eq!(successors.current_edge_index, Some(EdgeIndex(42)));
     }
 
     #[test]
@@ -354,7 +416,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_children() {
+    fn successors() {
         let mut graph = Graph::<Dummy>::new();
         let one = graph.add_node(Dummy("one"));
         let two = graph.add_node(Dummy("two"));
@@ -363,130 +425,122 @@ mod tests {
         let five = graph.add_node_to(four, Dummy("five"));
         assert_eq!(graph.nodes.len(), 5);
         assert_eq!(graph.edges.len(), 2);
-        let children = graph.direct_children(None);
-        assert_eq!(children.len(), 3);
-        assert_eq!(children.iter().eq([one, two, three].iter()), true);
-        let children = graph.direct_children(Some(one));
-        assert_eq!(children.len(), 1);
-        assert_eq!(children.iter().eq([four].iter()), true);
-        let children = graph.direct_children(Some(four));
-        assert_eq!(children.len(), 1);
-        assert_eq!(children.iter().eq([five].iter()), true);
-        let children = graph.direct_children(Some(two));
-        assert_eq!(children.is_empty(), true);
-        let children = graph.direct_children(Some(three));
-        assert_eq!(children.is_empty(), true);
+        let mut successors = graph.successors(one);
+        assert_eq!(successors.next(), Some(four));
+        assert_eq!(successors.next(), None);
+        let mut successors = graph.successors(four);
+        assert_eq!(successors.next(), Some(five));
+        assert_eq!(successors.next(), None);
+        let successors = graph.successors(two);
+        assert_eq!(successors.count(), 0);
+        let successors = graph.successors(three);
+        assert_eq!(successors.count(), 0);
     }
 
     #[test]
-    fn direct_children_on_circular_graph() {
+    fn successors_on_circular_graph() {
         let mut graph = Graph::<Dummy>::new();
         let one = graph.add_node(Dummy("one"));
         let child = graph.add_node_to(one, Dummy("child"));
         graph.add_edge(child, one);
         assert_eq!(graph.nodes.len(), 2);
         assert_eq!(graph.edges.len(), 2);
-        let children = graph.direct_children(None);
-        assert_eq!(children.is_empty(), true);
-        let children = graph.direct_children(Some(one));
-        assert_eq!(children.len(), 1);
-        assert_eq!(children.iter().eq([child].iter()), true);
-        let children = graph.direct_children(Some(child));
-        assert_eq!(children.len(), 1);
-        assert_eq!(children.iter().eq([one].iter()), true);
+        let mut successors = graph.successors(one);
+        assert_eq!(successors.next(), Some(child));
+        assert_eq!(successors.next(), None);
+        let mut successors = graph.successors(child);
+        assert_eq!(successors.next(), Some(one));
+        assert_eq!(successors.next(), None);
     }
 
     #[test]
-    #[should_panic]
-    fn upstream_parents_on_empty_graph() {
+    fn roots() {
+        let mut graph = Graph::<Dummy>::new();
+        let one = graph.add_node(Dummy("one"));
+        let two = graph.add_node(Dummy("two"));
+        let three = graph.add_node(Dummy("three"));
+        let four = graph.add_node_to(one, Dummy("four"));
+        graph.add_node_to(four, Dummy("five"));
+        assert_eq!(graph.nodes.len(), 5);
+        assert_eq!(graph.edges.len(), 2);
+        let mut roots = graph.roots();
+        assert_eq!(roots.next(), Some(one));
+        assert_eq!(roots.next(), Some(two));
+        assert_eq!(roots.next(), Some(three));
+        assert_eq!(roots.next(), None);
+    }
+
+    #[test]
+    fn no_roots_on_circular_graph() {
+        let mut graph = Graph::<Dummy>::new();
+        let first = graph.add_node(Dummy("first"));
+        let second = graph.add_node_to(first, Dummy("second"));
+        graph.add_edge(second, first);
+        assert_eq!(graph.nodes.len(), 2);
+        assert_eq!(graph.edges.len(), 2);
+        let roots = graph.roots();
+        assert_eq!(roots.count(), 0);
+    }
+
+    #[test]
+    fn no_roots_on_empty_graph() {
         let graph = Graph::<Dummy>::new();
-        graph.upstream_parents(NodeIndex(0));
+        let roots = graph.roots();
+        assert_eq!(roots.count(), 0);
     }
 
     #[test]
     #[should_panic]
-    fn upstream_parents_invalid_index() {
+    fn ancestors_on_empty_graph() {
+        let graph = Graph::<Dummy>::new();
+        graph.ancestors(NodeIndex(0));
+    }
+
+    #[test]
+    #[should_panic]
+    fn ancestors_invalid_index() {
         let mut graph = Graph::<Dummy>::new();
         graph.add_node(Dummy("test"));
-        graph.upstream_parents(NodeIndex(1));
+        graph.ancestors(NodeIndex(1));
     }
 
     #[test]
-    fn upstream_parents() {
+    fn ancestors() {
         let mut graph = Graph::<Dummy>::new();
         let one = graph.add_node(Dummy("one"));
         let two = graph.add_node(Dummy("two"));
         let three = graph.add_node(Dummy("three"));
         let four = graph.add_node_to(one, Dummy("four"));
-        let five = graph.add_node_to(four, Dummy("five"));
-        assert_eq!(graph.nodes.len(), 5);
-        assert_eq!(graph.edges.len(), 2);
-        let parents = graph.upstream_parents(five);
-        assert_eq!(parents.iter().eq([four, one].iter()), true);
-        let parents = graph.upstream_parents(four);
-        assert_eq!(parents.iter().eq([one].iter()), true);
-        let parents = graph.upstream_parents(one);
-        assert_eq!(parents.is_empty(), true);
-        let parents = graph.upstream_parents(two);
-        assert_eq!(parents.is_empty(), true);
-        let parents = graph.upstream_parents(three);
-        assert_eq!(parents.is_empty(), true);
-    }
-
-    #[test]
-    fn upstream_several_parents_for_one_child() {
-        let mut graph = Graph::<Dummy>::new();
-        let one = graph.add_node(Dummy("one"));
-        let two = graph.add_node(Dummy("two"));
-        let three = graph.add_node(Dummy("three"));
-        let child = graph.add_node(Dummy("child"));
-        graph.add_edge(one, child);
-        graph.add_edge(two, child);
-        graph.add_edge(three, child);
+        graph.add_edge(two, four);
+        graph.add_edge(three, four);
         assert_eq!(graph.nodes.len(), 4);
         assert_eq!(graph.edges.len(), 3);
-        let parents = graph.upstream_parents(child);
-        assert_eq!(parents.iter().eq([one, two, three].iter()), true);
+        let mut ancestors = graph.ancestors(four);
+        assert_eq!(ancestors.next(), Some(one));
+        assert_eq!(ancestors.next(), Some(two));
+        assert_eq!(ancestors.next(), Some(three));
+        assert_eq!(ancestors.next(), None);
+        let ancestors = graph.ancestors(one);
+        assert_eq!(ancestors.count(), 0);
+        let ancestors = graph.ancestors(two);
+        assert_eq!(ancestors.count(), 0);
+        let ancestors = graph.ancestors(three);
+        assert_eq!(ancestors.count(), 0);
     }
 
     #[test]
-    fn upstream_complex_case() {
-        let mut graph = Graph::<Dummy>::new();
-        let root_one = graph.add_node(Dummy("root_one"));
-        let root_two = graph.add_node(Dummy("root_two"));
-        let one = graph.add_node(Dummy("one"));
-        let two = graph.add_node(Dummy("two"));
-        let three = graph.add_node(Dummy("three"));
-        let child = graph.add_node(Dummy("child"));
-        graph.add_edge(root_one, one);
-        graph.add_edge(root_one, two);
-        graph.add_edge(root_two, three);
-        graph.add_edge(one, child);
-        graph.add_edge(two, child);
-        graph.add_edge(three, child);
-        assert_eq!(graph.nodes.len(), 6);
-        assert_eq!(graph.edges.len(), 6);
-        let parents = graph.upstream_parents(child);
-        assert_eq!(parents.len(), 5);
-        assert_eq!(
-            parents
-                .iter()
-                .eq([one, root_one, two, three, root_two].iter()),
-            true
-        );
-    }
-
-    #[test]
-    fn upstream_parents_on_circular_graph() {
+    fn ancestors_on_circular_graph() {
         let mut graph = Graph::<Dummy>::new();
         let one = graph.add_node(Dummy("one"));
         let child = graph.add_node_to(one, Dummy("child"));
         graph.add_edge(child, one);
         assert_eq!(graph.nodes.len(), 2);
         assert_eq!(graph.edges.len(), 2);
-        let parents = graph.upstream_parents(child);
-        assert!(parents.iter().eq([one].iter()), true);
-        let parents = graph.upstream_parents(one);
-        assert!(parents.iter().eq([child].iter()), true);
+        let mut ancestors = graph.ancestors(child);
+        assert_eq!(ancestors.next(), Some(one));
+        assert_eq!(ancestors.next(), None);
+        let mut ancestors = graph.ancestors(one);
+        assert_eq!(ancestors.next(), Some(child));
+        assert_eq!(ancestors.next(), None);
     }
 }
