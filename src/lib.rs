@@ -182,25 +182,24 @@ impl<'a> Parser<'a> {
     }
 
     fn handle_subcommand(&mut self, arg: &str) -> bool {
-        true
-        // let direct_children = self.graph.children(self.current_subcmd);
-        // let result = direct_children.find(|index| {
-        // if let ArgType::SubCommand(subcommand) = &self.graph.nodes[index.0].data.kind {
-        // if subcommand.name == arg {
-        // return true;
-        // }
-        // if let Some(_) = subcommand.aliases.iter().find(|&&alias| alias == arg) {
-        // return true;
-        // }
-        // }
-        // false
-        // });
-        // if let Some(&index) = result {
-        // self.graph.nodes[index.0].data.found = true;
-        // self.current_subcmd = Some(index);
-        // return true;
-        // }
-        // false
+        let mut children = self.graph.successors(self.current_subcmd);
+        let result = children.find(|index| {
+            if let ArgType::SubCommand(subcommand) = &self.graph.nodes[index.0].data.kind {
+                if subcommand.name == arg {
+                    return true;
+                }
+                if let Some(_) = subcommand.aliases.iter().find(|&&alias| alias == arg) {
+                    return true;
+                }
+            }
+            false
+        });
+        if let Some(index) = result {
+            self.graph.nodes[index.0].data.found = true;
+            self.current_subcmd = Some(index);
+            return true;
+        }
+        false
     }
 
     // fn parse_long_option(&mut self, arg: &str) {
@@ -290,7 +289,7 @@ impl<'a> SubCommandConfig<'a> {
         }
         SubCommandConfig {
             flags: vec![],
-            name: name,
+            name,
             subcommands: vec![],
             aliases: vec![],
         }

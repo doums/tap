@@ -69,10 +69,10 @@ impl<T> Graph<T> {
         {
             panic!("invalid edge");
         }
-        if let Some(_) = self
+        if self
             .edges
             .iter()
-            .find(|edge| edge.source == source && edge.target == target)
+            .any(|edge| edge.source == source && edge.target == target)
         {
             panic!("invalid edge");
         }
@@ -83,13 +83,8 @@ impl<T> Graph<T> {
         self.nodes[source.0].first_edge = Some(EdgeIndex(index));
     }
 
-    pub fn roots(&self) -> Roots {
-        Roots::new(self)
-    }
-
-    pub fn successors(&self, source: NodeIndex) -> Successors {
-        let first_outgoing_edge = self.nodes[source].first_edge;
-        Successors::new(&self.edges, first_outgoing_edge)
+    pub fn successors(&self, source: Option<NodeIndex>) -> Successors {
+        Successors::new(&self, source)
     }
 
     pub fn ancestors(&self, source: NodeIndex) -> Ancestors {
@@ -98,15 +93,38 @@ impl<T> Graph<T> {
 }
 
 pub struct Successors<'a> {
-    edges: &'a Vec<Edge>,
+    edges: Option<&'a Vec<Edge>>,
     current_edge_index: Option<EdgeIndex>,
+    roots: Option<Vec<NodeIndex>>,
+    current_root_index: usize,
 }
 
 impl<'a> Successors<'a> {
-    fn new(edges: &'a Vec<Edge>, index: Option<EdgeIndex>) -> Self {
-        Successors {
-            edges,
-            current_edge_index: index,
+    fn new<T>(graph: &'a Graph<T>, source: Option<NodeIndex>) -> Self {
+        if let Some(index) = source {
+            if index.0 >= graph.nodes.len() {
+                panic!("invalid index");
+            }
+            let first_outgoing_edge = graph.nodes[index].first_edge;
+            Successors {
+                edges: Some(&graph.edges),
+                current_edge_index: first_outgoing_edge,
+                roots: None,
+                current_root_index: 0,
+            }
+        } else {
+            let mut roots = vec![];
+            for (i, _) in graph.nodes.iter().enumerate() {
+                if let false = graph.edges.iter().any(|edge| edge.target == NodeIndex(i)) {
+                    roots.push(NodeIndex(i));
+                }
+            }
+            Successors {
+                edges: None,
+                current_edge_index: None,
+                roots: Some(roots),
+                current_root_index: 0,
+            }
         }
     }
 }
@@ -115,16 +133,30 @@ impl Iterator for Successors<'_> {
     type Item = NodeIndex;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.edges.is_empty() == true {
-            return None;
-        }
-        match self.current_edge_index {
-            None => None,
-            Some(edge_index) => {
-                let edge = &self.edges[edge_index];
-                self.current_edge_index = edge.next_edge;
-                Some(edge.target)
+        if let Some(roots) = &self.roots {
+            if roots.is_empty() {
+                return None;
             }
+            if let Some(value) = roots.get(self.current_root_index) {
+                self.current_root_index += 1;
+                Some(*value)
+            } else {
+                None
+            }
+        } else if let Some(edges) = self.edges {
+            if edges.is_empty() {
+                return None;
+            }
+            match self.current_edge_index {
+                None => None,
+                Some(edge_index) => {
+                    let edge = &edges[edge_index];
+                    self.current_edge_index = edge.next_edge;
+                    Some(edge.target)
+                }
+            }
+        } else {
+            None
         }
     }
 }
@@ -141,10 +173,8 @@ impl Ancestors {
         }
         let mut data = vec![];
         for edge in graph.edges.iter().filter(|edge| edge.target == from) {
-            if let None = data.iter().find(|&&index| index == edge.source) {
-                if edge.source != from {
-                    data.push(edge.source);
-                }
+            if data.iter().find(|&&index| index == edge.source).is_none() && edge.source != from {
+                data.push(edge.source);
             }
         }
         Ancestors {
@@ -158,43 +188,7 @@ impl Iterator for Ancestors {
     type Item = NodeIndex;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.data.is_empty() == true {
-            return None;
-        }
-        if let Some(value) = self.data.get(self.current_index) {
-            self.current_index += 1;
-            Some(*value)
-        } else {
-            None
-        }
-    }
-}
-
-pub struct Roots {
-    data: Vec<NodeIndex>,
-    current_index: usize,
-}
-
-impl Roots {
-    fn new<T>(graph: &Graph<T>) -> Roots {
-        let mut data = vec![];
-        for (i, _) in graph.nodes.iter().enumerate() {
-            if let None = graph.edges.iter().find(|edge| edge.target == NodeIndex(i)) {
-                data.push(NodeIndex(i));
-            }
-        }
-        Roots {
-            data,
-            current_index: 0,
-        }
-    }
-}
-
-impl Iterator for Roots {
-    type Item = NodeIndex;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.data.is_empty() == true {
+        if self.data.is_empty() {
             return None;
         }
         if let Some(value) = self.data.get(self.current_index) {
@@ -272,11 +266,30 @@ mod tests {
 
     #[test]
     fn successors_new() {
-        let graph = Graph::<Dummy>::new();
-        let successors = Successors::new(&graph.edges, None);
+        let mut graph = Graph::<Dummy>::new();
+        let one = graph.add_node(Dummy("one"));
+        let two = graph.add_node_to(one, Dummy("two"));
+        let successors = Successors::new(&graph, Some(one));
+        assert_eq!(successors.edges.unwrap().len(), 1);
+        assert_eq!(successors.edges.unwrap()[0].source, one);
+        assert_eq!(successors.edges.unwrap()[0].target, two);
+        assert_eq!(successors.current_edge_index, Some(EdgeIndex(0)));
+        assert_eq!(successors.roots, None);
+        assert_eq!(successors.current_root_index, 0);
+    }
+
+    #[test]
+    fn successors_new_in_root_mod() {
+        let mut graph = Graph::<Dummy>::new();
+        let one = graph.add_node(Dummy("one"));
+        graph.add_node_to(one, Dummy("two"));
+        let successors = Successors::new(&graph, None);
+        assert_eq!(successors.edges.is_none(), true);
         assert_eq!(successors.current_edge_index, None);
-        let successors = Successors::new(&graph.edges, Some(EdgeIndex(42)));
-        assert_eq!(successors.current_edge_index, Some(EdgeIndex(42)));
+        let roots = successors.roots.unwrap();
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0], NodeIndex(0));
+        assert_eq!(successors.current_root_index, 0);
     }
 
     #[test]
@@ -425,15 +438,15 @@ mod tests {
         let five = graph.add_node_to(four, Dummy("five"));
         assert_eq!(graph.nodes.len(), 5);
         assert_eq!(graph.edges.len(), 2);
-        let mut successors = graph.successors(one);
+        let mut successors = graph.successors(Some(one));
         assert_eq!(successors.next(), Some(four));
         assert_eq!(successors.next(), None);
-        let mut successors = graph.successors(four);
+        let mut successors = graph.successors(Some(four));
         assert_eq!(successors.next(), Some(five));
         assert_eq!(successors.next(), None);
-        let successors = graph.successors(two);
+        let successors = graph.successors(Some(two));
         assert_eq!(successors.count(), 0);
-        let successors = graph.successors(three);
+        let successors = graph.successors(Some(three));
         assert_eq!(successors.count(), 0);
     }
 
@@ -445,12 +458,27 @@ mod tests {
         graph.add_edge(child, one);
         assert_eq!(graph.nodes.len(), 2);
         assert_eq!(graph.edges.len(), 2);
-        let mut successors = graph.successors(one);
+        let mut successors = graph.successors(Some(one));
         assert_eq!(successors.next(), Some(child));
         assert_eq!(successors.next(), None);
-        let mut successors = graph.successors(child);
+        let mut successors = graph.successors(Some(child));
         assert_eq!(successors.next(), Some(one));
         assert_eq!(successors.next(), None);
+    }
+
+    #[test]
+    #[should_panic]
+    fn successors_on_empty_graph() {
+        let graph = Graph::<Dummy>::new();
+        graph.successors(Some(NodeIndex(0)));
+    }
+
+    #[test]
+    #[should_panic]
+    fn successors_invalid_index() {
+        let mut graph = Graph::<Dummy>::new();
+        graph.add_node(Dummy("test"));
+        graph.successors(Some(NodeIndex(1)));
     }
 
     #[test]
@@ -463,7 +491,7 @@ mod tests {
         graph.add_node_to(four, Dummy("five"));
         assert_eq!(graph.nodes.len(), 5);
         assert_eq!(graph.edges.len(), 2);
-        let mut roots = graph.roots();
+        let mut roots = graph.successors(None);
         assert_eq!(roots.next(), Some(one));
         assert_eq!(roots.next(), Some(two));
         assert_eq!(roots.next(), Some(three));
@@ -478,14 +506,14 @@ mod tests {
         graph.add_edge(second, first);
         assert_eq!(graph.nodes.len(), 2);
         assert_eq!(graph.edges.len(), 2);
-        let roots = graph.roots();
+        let roots = graph.successors(None);
         assert_eq!(roots.count(), 0);
     }
 
     #[test]
     fn no_roots_on_empty_graph() {
         let graph = Graph::<Dummy>::new();
-        let roots = graph.roots();
+        let roots = graph.successors(None);
         assert_eq!(roots.count(), 0);
     }
 
